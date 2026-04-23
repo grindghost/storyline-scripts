@@ -29,8 +29,8 @@ let state = {
   currentTimeMs: 0,
   currentSlidePath: "",
 };
-let hoveredShapeId = null;
-let selectedShapeId = null;
+let hoveredShapeKey = null;
+let selectedShapeKey = null;
 
 copyInspectBtn.addEventListener("click", async () => {
   const text = inspectOutputEl.textContent || "";
@@ -118,7 +118,8 @@ function resetView() {
   timeRange.disabled = true;
   timeRange.value = "0";
   timeLabel.textContent = "0 ms";
-  selectedShapeId = null;
+  hoveredShapeKey = null;
+  selectedShapeKey = null;
   inspectOutputEl.textContent = "Clique sur un element pour voir ses details.";
 }
 
@@ -167,6 +168,8 @@ function parseSlideXml(xmlText, ctx, slideRels) {
   shapeNodes.forEach((node, index) => {
     const tagName = node.tagName;
     const id = node.getAttribute("id") || `tb-${index + 1}`;
+    const shapeKey = `${tagName}-${index + 1}-${id}`;
+    const shapeState = node.getAttribute("state") || "";
     const zOrder = Number(node.getAttribute("zOrder") || index);
     const plainText = (node.querySelector(":scope > plain")?.textContent || "").trim();
     const richData = extractRichTextData(node);
@@ -176,6 +179,7 @@ function parseSlideXml(xmlText, ctx, slideRels) {
     const alt = (node.querySelector(":scope > alt")?.textContent || "").trim();
     const timing = readTiming(node);
     const rect = readShapeRect(node);
+    const transform = readShapeTransform(node);
     const role = classifyShape(node, tagName);
     if (shouldSkipShape(node, role)) {
       return;
@@ -191,6 +195,8 @@ function parseSlideXml(xmlText, ctx, slideRels) {
     if (mediaRef?.kind === "audio" && mediaRef?.file) resolvedAudios += 1;
 
     const buttonNormalNode = role === "button" ? getButtonNormalStateNode(node) : null;
+    let textStyleNode = node;
+    let textStyleRich = richData.style;
     if (buttonNormalNode) {
       const normalPlain = (buttonNormalNode.querySelector(":scope > plain")?.textContent || "").trim();
       const normalRich = extractRichTextData(buttonNormalNode);
@@ -198,17 +204,24 @@ function parseSlideXml(xmlText, ctx, slideRels) {
       if (normalText) {
         text = normalText;
       }
+      textStyleNode = buttonNormalNode;
+      textStyleRich = normalRich.style;
+    }
+    if (role === "button") {
+      text = normalizeButtonLabel(text);
     }
 
     shapes.push({
+      key: shapeKey,
       id,
+      state: shapeState,
       tagName,
       role,
       name,
       typeName,
       zOrder,
       text,
-      textStyle: deriveTextStyle(node, richData.style),
+      textStyle: deriveTextStyle(textStyleNode, textStyleRich),
       alt,
       triggerCount,
       assetG,
@@ -217,6 +230,7 @@ function parseSlideXml(xmlText, ctx, slideRels) {
       durMs: timing.durMs,
       endMs: timing.startMs + timing.durMs,
       rect,
+      transform,
       boxStyle: role === "button" ? extractButtonBaseStyle(node, rect) : null,
     });
   });
@@ -250,11 +264,15 @@ function readTiming(textboxNode) {
   const tmCtx =
     textboxNode.querySelector("tmCtxLst > txtTmCtx") ||
     textboxNode.querySelector("tmCtxLst > *");
+  const tmProps = textboxNode.querySelector(":scope > tmProps");
   const startMs = Number(tmCtx?.getAttribute("start") || 0);
   const durMsRaw = Number(tmCtx?.getAttribute("dur") || 0);
   const durMs = Math.max(0, durMsRaw);
-  const visibleAttr = (tmCtx?.getAttribute("visible") || "").trim().toLowerCase();
-  const isVisible = visibleAttr !== "false";
+  const tmCtxVisible = (tmCtx?.getAttribute("visible") || "").trim().toLowerCase();
+  const tmPropsVisible = (tmProps?.getAttribute("visible") || "").trim().toLowerCase();
+  const tmPropsHideAll = (tmProps?.getAttribute("hideAll") || "").trim().toLowerCase();
+  const isVisible =
+    tmCtxVisible !== "false" && tmPropsVisible !== "false" && tmPropsHideAll !== "true";
   return { startMs, durMs, isVisible };
 }
 
@@ -294,8 +312,25 @@ function readShapeRect(node) {
   return { left: 20, top: 20, width: 180, height: 60 };
 }
 
+function readShapeTransform(node) {
+  const rawRot = Number(node.getAttribute("rot"));
+  const hasRotation = Number.isFinite(rawRot) && rawRot >= 0 && Math.abs(rawRot) > 0.001;
+  const flipH = (node.getAttribute("flipH") || "").toLowerCase() === "true";
+  const flipV = (node.getAttribute("flipV") || "").toLowerCase() === "true";
+  if (!hasRotation && !flipH && !flipV) return "";
+
+  const parts = [];
+  if (hasRotation) parts.push(`rotate(${rawRot}deg)`);
+  if (flipH || flipV) {
+    const sx = flipH ? -1 : 1;
+    const sy = flipV ? -1 : 1;
+    parts.push(`scale(${sx}, ${sy})`);
+  }
+  return parts.join(" ");
+}
+
 function classifyShape(node, tagName) {
-  if (tagName === "pic") return "image";
+  if (tagName === "pic" || tagName === "svgimage") return "image";
   if (tagName === "sound" || tagName === "audio") return "audio";
   if (tagName === "video") return "video";
   if (tagName === "textBox") return "text";
@@ -315,11 +350,16 @@ function classifyShape(node, tagName) {
 
 function shouldSkipShape(node, role) {
   if (role !== "image") return false;
+  const tmProps = node.querySelector(":scope > tmProps");
   const tmCtx =
     node.querySelector("tmCtxLst > txtTmCtx") ||
     node.querySelector("tmCtxLst > *");
-  const visibleAttr = (tmCtx?.getAttribute("visible") || "").trim().toLowerCase();
-  if (visibleAttr === "false") return true;
+  const tmCtxVisible = (tmCtx?.getAttribute("visible") || "").trim().toLowerCase();
+  const tmPropsVisible = (tmProps?.getAttribute("visible") || "").trim().toLowerCase();
+  const tmPropsHideAll = (tmProps?.getAttribute("hideAll") || "").trim().toLowerCase();
+  if (tmCtxVisible === "false") return true;
+  if (tmPropsVisible === "false") return true;
+  if (tmPropsHideAll === "true") return true;
   return false;
 }
 
@@ -344,15 +384,11 @@ function extractEmbeddedText(raw) {
       return "";
     }
 
-    const spanNodes = embedded.querySelectorAll("Block > Span");
-    if (!spanNodes.length) {
+    const text = extractEmbeddedBlocksText(embedded);
+    if (!text) {
       return "";
     }
-
-    return Array.from(spanNodes)
-      .map((span) => span.getAttribute("Text") || "")
-      .join("\n")
-      .trim();
+    return text;
   } catch {
     return "";
   }
@@ -390,6 +426,14 @@ function preferKeysFromText(target, fromText, keys) {
   });
 }
 
+function normalizeButtonLabel(text) {
+  return (text || "")
+    .replace(/\r/g, "\n")
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function parseEmbeddedRich(raw) {
   if (!raw || !raw.trim()) return { text: "", style: {} };
   try {
@@ -398,11 +442,7 @@ function parseEmbeddedRich(raw) {
 
     const spans = Array.from(embedded.querySelectorAll("Block > Span"));
     if (!spans.length) return { text: "", style: {} };
-
-    const text = spans
-      .map((span) => (span.getAttribute("Text") || "").replace(/\r/g, "\n"))
-      .join("\n")
-      .trim();
+    const text = extractEmbeddedBlocksText(embedded);
 
     const styleNode = spans[0].querySelector("Style");
     const blockStyle = embedded.querySelector("Block > Style");
@@ -416,6 +456,23 @@ function parseEmbeddedRich(raw) {
   } catch {
     return { text: "", style: {} };
   }
+}
+
+function extractEmbeddedBlocksText(embeddedDoc) {
+  const blocks = Array.from(embeddedDoc.querySelectorAll("Block"));
+  if (!blocks.length) return "";
+
+  const lines = blocks
+    .map((block) => {
+      const spans = Array.from(block.querySelectorAll(":scope > Span"));
+      if (!spans.length) return "";
+      return spans
+        .map((span) => (span.getAttribute("Text") || "").replace(/\r/g, "\n"))
+        .join("");
+    })
+    .filter((line) => line !== "");
+
+  return lines.join("\n").trim();
 }
 
 function attrsToObject(namedNodeMap) {
@@ -656,25 +713,28 @@ function renderAll() {
 
     const box = document.createElement("div");
     box.className = `shape shape-${shape.role}`;
-    box.dataset.id = shape.id;
+    box.dataset.id = shape.key;
     box.style.left = `${shape.rect.left}px`;
     box.style.top = `${shape.rect.top}px`;
     box.style.width = `${shape.rect.width}px`;
     box.style.height = `${shape.rect.height}px`;
     box.style.zIndex = String(shape.zOrder);
+    box.style.display = shape.state === "107367" || shape.state === "107303" ? "none" : "";
+    box.style.transformOrigin = "center center";
+    box.style.transform = shape.transform || "";
     applyBoxStyle(box, shape.boxStyle);
     box.innerHTML = getShapeInnerHtml(shape);
-    box.addEventListener("click", () => selectShape(shape.id));
+    box.addEventListener("click", () => selectShape(shape.key));
     stageEl.appendChild(box);
 
     maxRight = Math.max(maxRight, shape.rect.left + shape.rect.width);
     maxBottom = Math.max(maxBottom, shape.rect.top + shape.rect.height);
 
     const li = document.createElement("li");
-    li.dataset.id = shape.id;
-    li.addEventListener("mouseenter", () => setHoveredShape(shape.id));
-    li.addEventListener("mouseleave", () => clearHoveredShape(shape.id));
-    li.addEventListener("click", () => selectShape(shape.id));
+    li.dataset.id = shape.key;
+    li.addEventListener("mouseenter", () => setHoveredShape(shape.key));
+    li.addEventListener("mouseleave", () => clearHoveredShape(shape.key));
+    li.addEventListener("click", () => selectShape(shape.key));
     li.innerHTML = `
       <div><strong>${escapeHtml(shape.id)}</strong> | ${escapeHtml(shape.tagName)} (${escapeHtml(shape.role)})</div>
       <div>${escapeHtml(shape.text || shape.name || shape.typeName || "(sans texte)")}</div>
@@ -701,51 +761,51 @@ function renderActiveState() {
   state.shapes.forEach((shape) => {
     const isActive = current >= shape.startMs && current <= shape.endMs;
 
-    const box = stageEl.querySelector(`.shape[data-id="${cssEscape(shape.id)}"]`);
+    const box = stageEl.querySelector(`.shape[data-id="${cssEscape(shape.key)}"]`);
     if (box) {
       box.classList.toggle("active", isActive);
       box.classList.toggle("inactive", !isActive);
-      box.classList.toggle("hovered-from-list", hoveredShapeId === shape.id);
-      if (HIDE_INACTIVE_IMAGES && shape.role === "image" && !isActive) {
-        box.style.visibility = "hidden";
-      } else if (SHOW_INACTIVE_AS_GHOST) {
+      box.classList.toggle("hovered-from-list", hoveredShapeKey === shape.key);
+      if (SHOW_INACTIVE_AS_GHOST) {
         box.style.visibility = "visible";
+      } else if (HIDE_INACTIVE_IMAGES && shape.role === "image" && !isActive) {
+        box.style.visibility = "hidden";
       } else {
         box.style.visibility = isActive ? "visible" : "hidden";
       }
-      if (hoveredShapeId === shape.id) {
+      if (hoveredShapeKey === shape.key) {
         box.style.visibility = "visible";
       }
-      box.style.outlineOffset = selectedShapeId === shape.id ? "2px" : "0";
-      if (selectedShapeId === shape.id) {
+      box.style.outlineOffset = selectedShapeKey === shape.key ? "2px" : "0";
+      if (selectedShapeKey === shape.key) {
         box.style.outlineColor = "#74c0ff";
       }
     }
 
-    const listItem = listEl.querySelector(`li[data-id="${cssEscape(shape.id)}"]`);
+    const listItem = listEl.querySelector(`li[data-id="${cssEscape(shape.key)}"]`);
     if (listItem) {
       listItem.classList.toggle("current", isActive);
-      listItem.classList.toggle("hovered", hoveredShapeId === shape.id);
-      listItem.classList.toggle("selected", selectedShapeId === shape.id);
+      listItem.classList.toggle("hovered", hoveredShapeKey === shape.key);
+      listItem.classList.toggle("selected", selectedShapeKey === shape.key);
     }
   });
 }
 
-function setHoveredShape(id) {
-  hoveredShapeId = id;
+function setHoveredShape(key) {
+  hoveredShapeKey = key;
   renderActiveState();
 }
 
-function clearHoveredShape(id) {
-  if (hoveredShapeId !== id) return;
-  hoveredShapeId = null;
+function clearHoveredShape(key) {
+  if (hoveredShapeKey !== key) return;
+  hoveredShapeKey = null;
   renderActiveState();
 }
 
-function selectShape(id) {
-  selectedShapeId = id;
+function selectShape(key) {
+  selectedShapeKey = key;
   renderActiveState();
-  const shape = state.shapes.find((s) => s.id === id);
+  const shape = state.shapes.find((s) => s.key === key);
   if (!shape) return;
   inspectOutputEl.textContent = formatShapeDebug(shape);
 }
@@ -812,7 +872,7 @@ function extractButtonBaseStyle(buttonNode, rect) {
 
   const fillColor = readFillColor(bgNode);
   const lineInfo = readLineStyle(bgNode);
-  const radius = readButtonRadius(baseNode, rect);
+  const radius = readButtonRadius(baseNode, rect, buttonNode);
 
   return {
     backgroundColor: fillColor || "rgba(60,165,92,0.35)",
@@ -860,8 +920,11 @@ function readLineStyle(bgNode) {
   return { widthPx, color: "" };
 }
 
-function readButtonRadius(node, rect) {
-  const rndC = node.querySelector(":scope > rndC");
+function readButtonRadius(node, rect, fallbackNode = null) {
+  const radiusNode =
+    node.querySelector(":scope > rndC") ||
+    fallbackNode?.querySelector(":scope > rndC");
+  const rndC = radiusNode;
   if (rndC) {
     const usePc = (rndC.getAttribute("usePc") || "").toLowerCase() === "true";
     const corners = ["rTL", "rTR", "rBL", "rBR"]
@@ -877,7 +940,12 @@ function readButtonRadius(node, rect) {
       return Math.max(2, Math.min(rect.width, rect.height) * defAll);
     }
   }
-  if (node.querySelector(":scope > prstGeom > roundedCorners")) return 10;
+  if (
+    node.querySelector(":scope > prstGeom > roundedCorners") ||
+    fallbackNode?.querySelector(":scope > prstGeom > roundedCorners")
+  ) {
+    return Math.max(10, Math.min(rect.width, rect.height) * 0.5);
+  }
   return 8;
 }
 
