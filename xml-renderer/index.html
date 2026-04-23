@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Storyline slide.xml renderer (MVP)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700;800&family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="panel">
+        <h1>Storyline slide.xml renderer (MVP)</h1>
+        <p class="muted">
+          Apercu read-only d'un <code>slide.xml</code> (textBox + timing).
+        </p>
+
+        <div class="controls">
+          <label class="file-picker">
+            <span>Choisir le dossier projet Storyline</span>
+            <input id="projectFolderInput" type="file" webkitdirectory directory multiple />
+          </label>
+
+          <div class="timeline">
+            <label for="timeRange">Temps:</label>
+            <input id="timeRange" type="range" min="0" max="1000" value="0" disabled />
+            <span id="timeLabel">0 ms</span>
+          </div>
+        </div>
+
+        <div class="slides-browser">
+          <div class="slides-header">
+            <strong>Slides detectees</strong>
+            <span id="slideCount" class="muted">0</span>
+          </div>
+          <ul id="slideList" class="slide-list"></ul>
+        </div>
+
+        <div class="inspector">
+          <div class="inspector-header">
+            <strong>Inspecteur element</strong>
+            <button id="copyInspectBtn" type="button">Copier</button>
+          </div>
+          <pre id="inspectOutput" class="inspect-output">Clique sur un element pour voir ses details.</pre>
+        </div>
+
+        <p id="status" class="status">Charge un fichier XML pour commencer.</p>
+      </header>
+
+      <section class="layout">
+        <article class="panel stage-panel">
+          <h2>Stage (approximation)</h2>
+          <div id="stage" class="stage"></div>
+        </article>
+
+        <article class="panel list-panel">
+          <h2>Elements detectes</h2>
+          <div id="stats" class="stats"></div>
+          <ul id="textboxList" class="textbox-list"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
