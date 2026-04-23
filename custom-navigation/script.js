@@ -1,5 +1,9 @@
-window.Script6 = function()
-{
+/*
+ * Script: custom-navigation
+ * Date: 2026-04-23
+ * Auteur: grindghost
+ */
+
   (function () {
   function startRefreshInterval(refreshFn) {
     if (window.__storylineSliderNavInterval) {
@@ -409,4 +413,3 @@ window.Script6 = function()
   window.addEventListener("orientationchange", refresh);
   startRefreshInterval(refresh);
 })();
-}
