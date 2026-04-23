@@ -1,6 +1,6 @@
 # Storyline Scripts
 
-Ce projet sert à documenter et archiver mes scripts JavaScript personnalisés pour Articulate Storyline.
+Ce repo sert à documenter et archiver mes scripts JavaScript personnalisés pour Articulate Storyline.
 
 Ces scripts ont été développés au fil des dernières années pour :
 
